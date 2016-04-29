@@ -1,0 +1,539 @@
+---
+title: "Time Series Final Project"
+author: "Felipe Chamma, Eric Lee, Miao Lu"
+date: "November 24, 2015"
+output: html_document
+---
+
+Description of the problem
+===========================
+
+(This is just for a filler for now)
+Accurately forecasting national bankruptcy rates is of interest to national banks, insurance companies, credit-lenders, politicians etc. The goal of this project will be to precisely and accurately forecast monthly bankruptcy rates for Canada. In the file `train.csv` you will find monthly data from January 1987 to December 2010 on the following variables:
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(forecast)  #ndiffs
+library(astsa)  #sarima
+library(tseries)
+library(colorspace)
+panel.hist <- function(x, ...)
+{
+    usr <- par("usr"); on.exit(par(usr))
+    par(usr = c(usr[1:2], 0, 1.5) )
+    h <- hist(x, plot = FALSE)
+    breaks <- h$breaks; nB <- length(breaks)
+    y <- h$counts; y <- y/max(y)
+    rect(breaks[-nB], 0, breaks[-1], y, col = "coral", ...)
+}
+panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...)
+{
+    usr <- par("usr"); on.exit(par(usr))
+    par(usr = c(0, 1, 0, 1))
+    r <- abs(cor(x, y))
+    txt <- format(c(r, 0.123456789), digits = digits)[1]
+    txt <- paste0(prefix, txt)
+    if(missing(cex.cor)) cex.cor <- 0.8/strwidth(txt)
+    text(0.5, 0.5, txt, cex = cex.cor * r)
+}
+```
+
+```{r echo=FALSE, warning=FALSE}
+# setwd("~/Documents/604_time_series/data")
+train <- read.csv("train.csv")
+test <- read.csv("test.csv")
+```
+
+__Transform Data__
+
+```{r}
+attach(train)
+par(mfrow=c(2,1))
+plot(Bankruptcy_Rate, main = "Bankruptcy Rate", xaxt = "n", type='l', xlab="Year")
+axis(1,at = c(0:23)*12, c(1987:2010))
+plot(log(Bankruptcy_Rate), main = "log(Bankruptcy Rate)", xaxt="n", type = 'l', xlab="Year")
+axis(1,at = c(0:23)*12, c(1987:2010))
+
+train2 <- train
+train2$Unemployment_Rate <- scale(train2$Unemployment_Rate)
+train2$Population <- scale(Population)
+train2$House_Price_Index <- scale(train2$House_Price_Index)
+train2$Bankruptcy_Rate <- log(train2$Bankruptcy_Rate)
+attributes(train2$House_Price_Index) # REMEMBER THIS!!!!!
+```
+
+
+```{r}
+set.seed(100)
+nn <- ceiling(nrow(train2)*0.8)
+stest <- nn:nrow(train2)
+# stest <- sample(nrow(train),58, replace=F)  it is not right to sample it!!!
+train2.tr <- train2[-stest,] # Train
+train2.te <- train2[stest,] # Test 
+
+acf(train2.tr$Bankruptcy_Rate) ; pacf(train2.tr$Bankruptcy_Rate)
+ndiffs(train2.tr$Bankruptcy_Rate)
+lbr.1 <- diff(train2.tr$Bankruptcy_Rate)
+adf.test(lbr.1) # Yay!
+d = 1
+plot(lbr.1, main = "log(Bankrupcy_Rate_t) - log(Bankrupcy_Rate_(t-1))", 
+     xaxt = "n", type='l',xlab = "Year")
+abline(h = 0, col = 'red', lty=2)
+axis(1,at = c(0:23)*12, c(1987:2010))
+
+
+
+
+acf(lbr.1, lag.max = 120); abline(v=c(1:10)*12, col='red', lty=2, cex = 0.3)
+pacf(lbr.1, lag.max = 120); abline(v=c(1:10)*12, col='red', lty=2, cex = 0.3)
+# s = 12  # ?
+
+year <- substr(train2.tr$Month, nchar(train2.tr$Month)-3,nchar(train2.tr$Month)) 
+mm <- substr(train2.tr$Month, 1,nchar(train2.tr$Month)-4) 
+
+par(mfrow=c(1,1))
+boxplot(lbr.1~mm[-1], col = rainbow(12), notch=T)   
+
+nsdiffs(lbr.1, m = 12)
+D = 0
+
+
+lbr.1.12 <- diff(lbr.1, lag = 12)
+
+acf(lbr.1.12, lag.max = 120); abline(v=c(1:10)*12, col='red', lty=2, cex = 0.3)
+pacf(lbr.1.12, lag.max = 120); abline(v=c(1:10)*12, col='red', lty=2, cex = 0.3)
+
+
+p = c(1:5)
+q = c(1:5)
+
+P = c(0:3)
+D = c(0:2)
+Q = c(0,3)
+s = c(12,24)
+
+reg <- list(c(2,3,5), c(2,3), c(3,5), 5, 2, 3, c(2,5))
+
+
+mod <- c()
+ll <- c()
+sig <- c()
+regg <- c()
+
+
+for (pi in p){
+  for (qi in q){
+    for (Pi in P){
+      for (Di in D){
+        for (Qi in Q){
+          for (si in s){
+            for (i in 1:length(reg)){
+              
+          selmod <- arima(train2.tr$Bankruptcy_Rate, order = c(pi,d,qi), 
+                          seasonal = list(order = c(Pi,Di,Qi), period = si), xreg=train2.tr[,reg[[i]]],
+                          method = "CSS", optim.control = list(maxit = 1000))
+          
+          mod <- c(mod,paste(c(pi,d,qi,Pi,Di,Qi,si), collapse = ","))
+          ll <- c(ll,selmod$loglik)
+          sig <- c(sig,selmod$sigma2)
+          regg <- c(regg,paste(c(reg[[i]]), collapse = ","))
+            }          
+          }
+        }
+      }
+    }
+  }
+}
+
+
+tab <- data.frame(mod,ll,sig, regg)
+tab <- tab[order(tab$ll, decreasing = T),]
+write.csv(tab, file = "models.csv")
+
+qqplot(m1$residuals)
+acf(m1$residuals)
+pacf(m1$residuals)
+tsdiag(m1)
+
+selmod <- arima(train2.tr$Bankruptcy_Rate, order = c(p,d,q), 
+                seasonal = list(order = c(P,D,Q), period = s), xreg=train2.tr[,reg[[i]]],
+                method = "ML",optim.control = list(maxit = 1000))
+
+
+shapiro.test(lbr.1)
+
+# ==================== after 1st meet ======================================
+mds <- read.csv("models_correctTest.csv")
+head(train)
+# Let's choose the model, pdq PDQ s , xregs
+# Run diagnostics
+# Decide if we need ARCH/GARCH
+# If we need it, we again iterate through different k and l to find best ARCH/GARCH model
+# Do the prediction with some models and choose the best model.
+
+
+# ====== Comparing 5 potential models, and using the best one to predict ======
+    
+# initially chosen models
+m1 <- arima(train2.tr$Bankruptcy_Rate, xreg = train2.tr[,c(3,5)],
+            order = c(2,1,3), seasonal = list(order = c(1,0,1), period = 12),
+            method = "ML")
+m2 <- arima(train2.tr$Bankruptcy_Rate, xreg = train2.tr[,c(2,3,5)],
+            order = c(2,1,3), seasonal = list(order = c(1,0,1), period = 12),
+            method = "ML", optim.control = list(maxit = 1000))
+m3 <- arima(train2.tr$Bankruptcy_Rate, xreg = train2.tr[,c(3, 5)],
+            order = c(3,1,3), seasonal = list(order = c(2,0,3), period = 12),
+            method = "ML", optim.control = list(maxit = 1000))
+m4 <- arima(train2.tr$Bankruptcy_Rate, xreg = train2.tr[,c(5)],
+            order = c(2,1,1), seasonal = list(order = c(1,0,1), period = 12),
+            method = "ML")
+m5 <- arima(train2.tr$Bankruptcy_Rate, xreg = train2.tr[,c(3,5)],
+            order = c(2,1,3), seasonal = list(order = c(0,0,0), period = 12),
+            method = "ML")
+
+###############
+# predictions for the training set (to calculate MSE)
+mfit1 <- fitted(m1)
+mfit2 <- fitted(m2)
+mfit3 <- fitted(m3)
+mfit4 <- fitted(m4)
+mfit5 <- fitted(m5)
+
+# predictions for the test set (to calculate MSPE)
+mpred1 <- predict(m1, n.ahead=58, newxreg = train2.te[, c(3, 5)])
+mpred2 <- predict(m2, n.ahead=58, newxreg = train2.te[, c(2,3,5)])
+mpred3 <- predict(m3, n.ahead=58, newxreg = train2.te[, c(3, 5)])
+mpred4 <- predict(m4, n.ahead=58, newxreg = train2.te[, c(5)])
+mpred5 <- predict(m5, n.ahead=58, newxreg = train2.te[, c(3, 5)])
+#######################
+# making lists of models and predictions to loop through
+models <- list(m1, m2, m3, m4, m5)
+modfit <- list(mfit1, mfit2, mfit3, mfit4, mfit5)
+modpred <- list(mpred1, mpred2, mpred3, mpred4, mpred5)
+
+# matrix that shows AIC, MSE and MSPE for each model
+sum_matrix <- matrix(nrow = length(models), ncol=3)
+colnames(sum_matrix) <- c("AIC", "MSE", "MSPE", "p,d,q", "P,D,Q,s")
+
+# loop to get key indicators for each model
+for (i in 1:length(models)) {
+  fitted_values <- as.vector(modfit[i][[1]])
+  sq_err_train <- (train2.tr$Bankruptcy_Rate - fitted_values)^2
+  pred_values <- as.vector(modpred[i][[1]]$pred)
+  sq_err_test <- (train2.te$Bankruptcy_Rate - pred_values)^2
+  
+  sum_matrix[i, 1] <- models[i][[1]]$aic
+  sum_matrix[i, 2] <- sum(sq_err_train)
+  sum_matrix[i, 3] <- sum(sq_err_test)
+#   sum_matrix[i, 4] <- substr(paste(m1$call$order, collapse=","),3,7)
+#   sum_matrix[i, 5] <- paste(as.character(m1$call$seasonal)[2:3], collapse=",")
+}
+
+# first and second models are the best, but the plots did not convince me..
+sum_matrix <- data.frame(AIC = sum_matrix[,1], 
+                            MSE = sum_matrix[,2], 
+                            MSPE = sum_matrix[,3])
+
+best <- m1
+
+models <- data.frame(ScaledAIC = sum_matrix$AIC/1000, sum_matrix[2:3])
+
+labels <- c("(2,1,3)x(1,0,1),12 [3,5]",
+            "(2,1,3)x(1,0,1),12 [2,3,5]",
+            "(3,1,3)x(2,0,3),12 [3,5]",
+            "(2,1,1)x(1,0,1),12 [5]",
+            "(2,1,3)x(0,0,0),12 [3,5]")
+
+plot(1:5, c(-3.5,0,0,0,8), ylab = "", xlab = "", col = "white", xaxt="n", yaxt="n", 
+     main = "Model Validation Criterions")
+for (i in 1:3){
+  lines(models[,i], col = rainbow_hcl(3)[i], lwd = 3)
+  points(models[,i], col = rainbow_hcl(3)[i], pch = 16)
+  text(1,4+i*0.8, names(models)[i], col = rainbow_hcl(3)[i], cex = 0.9, pos=4)
+  points(order(models[,i])[1], models[order(models[,i])[1],i], col = 'red', cex = 1.5)
+}
+text(x = seq(1, 5, by=1), par("usr")[3] + 0.5, 
+     labels = labels, srt = 35, pos = 1, xpd = TRUE, cex = 0.8)
+
+
+
+par(mfrow=c(1,2))
+plot(1:length(m1$coef), seq(-2,4, length.out = length(m1$coef)), pch ="",
+     main = "Significance of the coeffs: Model 1", xlab = "",
+     ylab = "Coefficients of Model 1", xaxt="n")
+
+points(1:length(m1$coef),m1$coef, pch = 16, cex=0.4)
+se <- sqrt(diag(m1$var.coef))
+points(1:length(m1$coef),m1$coef+1.96*se, pch = "-", col = 'blue')
+points(1:length(m1$coef),m1$coef-1.96*se, pch = "-", col = 'blue')
+coeffs <- data.frame(coef = m1$coef, se = se)
+coeffs$ll <- coeffs$coef-1.96*se
+coeffs$uu <- coeffs$coef+1.96*se
+for (i in 1:nrow(coeffs)){
+  lines(c(i,i), c(coeffs$ll[i],coeffs$uu[i]), col = 'blue')
+}
+abline(h = 0, col = 'red', lty = 2)
+# axis(1,at=1:9, labels = rownames(coeffs))
+text(x = seq(1, 9, by=1)+0.3, par("usr")[3]-0.2, 
+     labels = rownames(coeffs), srt = 35, pos = 2, xpd = TRUE, cex = 0.8)
+
+
+
+
+plot(1:length(m2$coef), seq(-2,4, length.out = length(m2$coef)), pch ="",
+     main = "Significance of the coeffs: Model 2", xlab = "",
+     ylab = "Coefficients of Model 2",xaxt = "n")
+
+points(1:length(m2$coef),m2$coef, pch = 16, cex=0.4)
+se <- sqrt(diag(m2$var.coef))
+points(1:length(m2$coef),m2$coef+1.96*se, pch = "-", col = 'blue')
+points(1:length(m2$coef),m2$coef-1.96*se, pch = "-", col = 'blue')
+coeffs <- data.frame(coef = m2$coef, se = se)
+coeffs$ll <- coeffs$coef-1.96*se
+coeffs$uu <- coeffs$coef+1.96*se
+for (i in 1:nrow(coeffs)){
+  lines(c(i,i), c(coeffs$ll[i],coeffs$uu[i]), col = 'blue')
+}
+abline(h = 0, col = 'red', lty = 2)
+text(x = seq(1, 10, by=1)+0.3, par("usr")[3]-0.2, 
+     labels = rownames(coeffs), srt = 35, pos = 2, xpd = TRUE, cex = 0.8)
+
+
+
+##########################################
+## Residual Diagnostics
+##########################################
+
+
+# Plot comparing fitted values and actual values in train2.tr
+par(mfrow=c(1,1))
+plot(ts(train2.tr$Bankruptcy_Rate), main = "Fitted values for Bankruptcy Rate")
+points(mfit1,type='l',col='red')
+points(mfit2,type='l', col = 'blue')
+
+# Plot for the predicted vs. actual values in the train2.te set
+t <- time(train2.te$Bankruptcy_Rate)
+par(mfrow=c(1,1))
+plot(ts(train2.te$Bankruptcy_Rate), ylim = c(-4,-3),
+     main = "Predicted values for Bankruptcy Rate")
+points(t, mpred1$pred, type='l',col='red')
+# points(t, mpred2$pred, type="l", col = 'blue')
+#axis(1,c(1:nrow(train2.te)), c())
+# ==================== edit the x-axis =================
+
+# Running model again to capture the whole training set
+m <- arima(train2$Bankruptcy_Rate, xreg = train2[,c(3,5)],
+           order = c(2,1,3), seasonal = list(order = c(1,0,1), period = 12),
+           method = "ML")
+
+best <- m
+# running diagnostics for the best model
+par(mfrow=c(3,2))
+# ACF and PACF plots
+# par(mfrow=c(2,1))
+Acf(best$residuals, main = "ACF: Residuals")
+Pacf(best$residuals, main = "PACF: Residuals")
+plot(best$residuals, main ="Residuals")
+# Checking normality
+# par(mfrow=c(1,1))
+qqplot(best$residuals, main = "QQ-Plot")
+tmp = shapiro.test(best$residuals) # residuals are normal
+text(-2,0.1, paste("Shapiro-Wilk Test\n", 
+                   "W = ", round(tmp$statistic,3), 
+                   "\np-val = ", round(tmp$p.value,3)
+                   , sep = ""), col = 'red', cex = 0.8)
+Acf(abs(best$residuals), main = "ACF: abs(Residuals)")
+Pacf(abs(best$residuals), main = "PACF: abs(Residuals)")
+
+
+
+# looks stationary. adf test:
+testt <- t.test(best$residuals)
+adfst <- adf.test(best$residuals) # stationarity confirmed
+
+# Testing for autocorrelation of residuals
+# tsdiag(best) # good up to lag 5
+boxlag = c(); boxx = c(); boxdf = c(); boxpval = c()
+for (i in 1:10){
+  tmp = Box.test(best$residuals,lag=i)
+  boxlag = c(boxlag, i)
+  boxx = c(boxx, tmp$statistic)
+  boxdf = c(boxdf, tmp$parameter)
+  boxpval = c(boxpval, tmp$p.value)
+}
+
+testlj <- data.frame(Lag = boxlag, 
+                     X.Squared = round(boxx,3), 
+                     p.val = round(boxpval,3))
+testrun <- runs.test(best$residuals)
+cat("Ljung-Box Test for different Lags")
+testlj
+
+#Heteroscedasticity
+library(lawstat)
+l <- round(nrow(train2)/5)
+group <- as.factor(c(rep(1, l), rep(2, l), rep(3, l), rep(4, l),rep(5, nrow(train2)-(4*l))))
+testlev <- levene.test(best$residuals, group)
+testlev
+
+# Normality
+testsw <- shapiro.test(best$residuals)
+testsw
+
+#alltests
+alltests = t(round(data.frame(t.test = c(testt$statistic, testt$p.value), 
+             adf.test = c(adfst$statistic, adfst$p.value),
+             Levene.test = c(testlev$statistic, testlev$p.value),
+             Shapiro.Wilk.test = c(testsw$statistic,testsw$p.value),
+             Runs.Test = c(testrun$statistic, testrun$p.value)),3))
+colnames(alltests) <- c("Statistic", "p-value")
+
+
+alltests
+testlj
+
+
+
+
+
+# Scaling test set variables accordingly
+test.pred <- test
+test.pred$Unemployment_Rate <- (test.pred$Unemployment_Rate - attributes(train2$Unemployment_Rate)$`scaled:center`)/attributes(train2$Unemployment_Rate)$`scaled:scale`
+test.pred$Population <- (test.pred$Population - attributes(train2$Population)$`scaled:center`)/attributes(train2$Population)$`scaled:scale`
+test.pred$House_Price_Index <- (test.pred$House_Price_Index - attributes(train2$House_Price_Index)$`scaled:center`)/attributes(train2$House_Price_Index)$`scaled:scale`
+
+
+# 12-step ahead prediction =========================
+# predicting values and confidence intervals
+fit <- predict(m, n.ahead=12, newxreg = test.pred[, c(3, 4)])
+upper <- fit$pred + 1.96 * fit$se
+lower <- fit$pred - 1.96 * fit$se
+
+# backtransforming from log
+fit$pred <- exp(fit$pred)
+upper <- exp(upper)
+lower <- exp(lower)    
+
+# Plot for predicted values (2011 data)
+t <- time(fit$pred)
+par(mfrow=c(1,1))
+plot(ts(train$Bankruptcy_Rate), xlim=c(1,300), main = "2011 Forecast", xaxt="n")
+axis(1,at = c(0:25)*12, c(1987:2012))
+
+abline(v = 289, col='blue', lty=2)
+points(t, fit$pred, type='l', col='red')
+points(t, upper, type='l', col='green')
+points(t, lower, type='l', col='green')
+
+
+# A close-up look at predicted values (2011 data)
+before <- 12
+whole <- before + 12
+par(mfrow=c(1,1))
+plot(ts(train$Bankruptcy_Rate[1:before]), type='o', xlim=c(1, whole), ylim=c(0,0.1), main = "2011 Forecast (close-up)")
+abline(v = before, col='blue', lty=2)
+points((before+1):whole, fit$pred, type='o', col='red')
+points((before+1):whole, lower, type='o', col='green')
+points((before+1):whole, upper, type='o', col='green')
+
+pred.m <- data.frame("fitted" = fit$pred, "lower" = lower, "upper" = upper)
+pred.m
+
+
+# Rolling window prediction ========================
+
+# create a new train data frame, train2.rw,  for rolling window prediction
+head(train2$Bankruptcy_Rate)
+head(train2) 
+
+train2.rw <- train2[,c(3,4,5)]
+head(train2.rw)
+
+# make sure that we are using the scaled test data frame, test.pred
+head(test.pred)
+head(test)
+
+# make sure that we are using the best model chosen previously
+best <- m
+
+# select the covariates chosen in the best model
+xreg.rw <- train2.rw[,c(1,3)]  # 1 for Population, 3 for House_Price_Index
+lower.rw <- c() 
+upper.rw <- c() 
+
+# predict for the following 12 months
+n <- 12
+for (i in 1:n){
+    # test.pred[i, c(3, 4)], 3 for Population, 4 for House_Price_Index
+    fit.rw <- predict(best, n.ahead = 1, trace = F, newxreg = test.pred[i, c(3, 4)])
+    
+    # create a new row to add to train2.rw
+    # test.pred[i,3] for Population, fit.rw$pred for Bankruptcy_Rate, 
+    # test.pred[i,4] for House_Price_Index
+    new.row <- c(test.pred[i,3], fit.rw$pred, test.pred[i,4])
+    train2.rw <- rbind(train2.rw, new.row)
+    
+    lower.rw <- c(lower.rw, fit.rw$pred - 1.96*fit.rw$se)
+    upper.rw <- c(upper.rw, fit.rw$pred + 1.96*fit.rw$se)
+    
+    # run the best model again to capture the new train2.rw
+    # train2.rw[, c(1, 3)], 1 for Population, 3 for House_Price_Index
+    best <- arima(train2.rw$Bankruptcy_Rate, xreg = train2.rw[,c(1,3)],
+           order = c(2,1,3), seasonal = list(order = c(1,0,1), period = 12),
+           method = "ML")
+}
+
+# rolling window prediction 
+pred.rw <- data.frame("fitted"= tail(train2.rw$Bankruptcy_Rate,n),"lower" = lower.rw, "upper" = upper.rw)
+pred.rw$fitted <- exp(pred.rw$fitted)
+pred.rw$lower <- exp(pred.rw$lower)
+pred.rw$upper <- exp(pred.rw$upper)
+
+pred.rw
+
+
+
+# Plot for 1-step-ahead rolling window predicted values (2011 data)
+par(mfrow=c(1,1))
+plot(ts(train$Bankruptcy_Rate), xlim=c(1,300), main = "2011 Rolling-Window Forecast", xaxt="n", xlab = "Year", ylab = "Bankruptcy Rate")
+abline(v = 289, col='blue', lty=2)
+# points(289:300, pred.rw$lower, type='l', col="mistyrose")
+# points(289:300, pred.rw$upper, type='l', col="mistyrose")
+polygon(c(289:300, rev(289:300)), c(pred.rw$upper, rev(pred.rw$lower)),
+     col = "mistyrose", border = NA)
+points(289:300, pred.rw$fitted, type='l', col='red', lwd = 2)
+axis(1,at = c(0:25)*12+1, c(1987:2012))
+
+#Closeup
+par(mfrow=c(1,1))
+plot(ts(train$Bankruptcy_Rate), xlim=c(250,300), main = "2011 Rolling-Window Forecast (Close-Up)", xlab = "Year", ylab = "Bankruptcy Rate", xaxt = "n")
+abline(v = 289, col='blue', lty=2)
+# points(289:300, pred.rw$lower, type='l', col="mistyrose")
+# points(289:300, pred.rw$upper, type='l', col="mistyrose")
+polygon(c(289:300, rev(289:300)), c(pred.rw$upper, rev(pred.rw$lower)),
+     col = "mistyrose", border = NA)
+points(289:300, pred.rw$fitted, type='l', col='red', lwd = 2)
+axis(1,at = c(0:25)*12+1, c(1987:2012))
+
+
+
+
+
+# A close-up look at 1-step-ahead rolling window predicted values (2011 data)
+before <- 12
+whole <- before + 12
+par(mfrow=c(1,1))
+plot(ts(train$Bankruptcy_Rate[1:before]), type='o', xlim=c(1, whole), ylim=c(0,0.1), main = "2011 Rolling-Window Forecast (close-up look)")
+abline(v = before, col='blue', lty=2)
+points((before+1):whole, pred.rw$fitted, type='o', col='red')
+points((before+1):whole, pred.rw$lower, type='o', col='green')
+points((before+1):whole, pred.rw$upper, type='o', col='green')
+
+pred.m
+pred.rw
+
+pred.diff <- pred.m$fitted - pred.rw$fitted
+pred.diff
+
+sd(pred.diff)
+```

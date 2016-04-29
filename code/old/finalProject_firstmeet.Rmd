@@ -1,0 +1,328 @@
+---
+title: "Time Series Final Project"
+author: "Felipe Chamma, Eric Lee, Miao Lu"
+date: "November 24, 2015"
+output: html_document
+---
+
+Description of the problem
+===========================
+
+(This is just for a filler for now)
+Accurately forecasting national bankruptcy rates is of interest to national banks, insurance companies, credit-lenders, politicians etc. The goal of this project will be to precisely and accurately forecast monthly bankruptcy rates for Canada. In the file `train.csv` you will find monthly data from January 1987 to December 2010 on the following variables:
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(forecast)  #ndiffs
+library(astsa)  #sarima
+library(tseries)
+panel.hist <- function(x, ...)
+{
+    usr <- par("usr"); on.exit(par(usr))
+    par(usr = c(usr[1:2], 0, 1.5) )
+    h <- hist(x, plot = FALSE)
+    breaks <- h$breaks; nB <- length(breaks)
+    y <- h$counts; y <- y/max(y)
+    rect(breaks[-nB], 0, breaks[-1], y, col = "coral", ...)
+}
+panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...)
+{
+    usr <- par("usr"); on.exit(par(usr))
+    par(usr = c(0, 1, 0, 1))
+    r <- abs(cor(x, y))
+    txt <- format(c(r, 0.123456789), digits = digits)[1]
+    txt <- paste0(prefix, txt)
+    if(missing(cex.cor)) cex.cor <- 0.8/strwidth(txt)
+    text(0.5, 0.5, txt, cex = cex.cor * r)
+}
+```
+
+```{r echo=FALSE, warning=FALSE}
+setwd("/Users/EricaJhLee/Dropbox/MSAN/02_Module_II/TimeSeries/FinalProject")
+train <- read.csv("train.csv")
+test <- read.csv("test.csv")
+```
+
+__Transform Data__
+
+```{r}
+attach(train)
+par(mfrow=c(2,1))
+ts.plot(Bankruptcy_Rate, main = "Bankruptcy Rate")
+ts.plot(log(Bankruptcy_Rate), main = "log(Bankruptcy Rate)")
+
+train2 <- train
+train2$Unemployment_Rate <- scale(train2$Unemployment_Rate)
+train2$Population <- scale(Population)
+train2$House_Price_Index <- scale(train2$House_Price_Index)
+train2$Bankruptcy_Rate <- log(train2$Bankruptcy_Rate)
+attributes(train2$House_Price_Index) # REMEMBER THIS!!!!!
+
+```
+
+
+```{r}
+set.seed(100)
+nn <- ceiling(nrow(train2)*0.8)
+stest <- nn:nrow(train2)
+train2.tr <- train2[-stest,] # Train
+train2.te <- train2[stest,] # Test
+
+acf(train2.tr$Bankruptcy_Rate) ; pacf(train2.tr$Bankruptcy_Rate)
+ndiffs(train2.tr$Bankruptcy_Rate)
+lbr.1 <- diff(train2.tr$Bankruptcy_Rate)
+adf.test(lbr.1) # Yay!
+d = 1
+
+acf(lbr.1, lag.max = 120); abline(v=c(1:10)*12, col='red', lty=2, cex = 0.3)
+pacf(lbr.1, lag.max = 120); abline(v=c(1:10)*12, col='red', lty=2, cex = 0.3)
+# s = 12  # ?
+
+year <- substr(train2.tr$Month, nchar(train2.tr$Month)-3,nchar(train2.tr$Month)) 
+mm <- substr(train2.tr$Month, 1,nchar(train2.tr$Month)-4) 
+
+par(mfrow=c(1,1))
+boxplot(lbr.1~mm[-1], col = rainbow(12), notch=T)
+
+nsdiffs(lbr.1, m = 12)
+D = 0
+
+
+lbr.1.12 <- diff(lbr.1, lag = 12)
+
+acf(lbr.1.12, lag.max = 120); abline(v=c(1:10)*12, col='red', lty=2, cex = 0.3)
+pacf(lbr.1.12, lag.max = 120); abline(v=c(1:10)*12, col='red', lty=2, cex = 0.3)
+
+
+p = c(1:5)
+q = c(1:5)
+
+P = c(0:3)
+D = c(0:2)
+Q = c(0,3)
+s = c(12,24)
+
+reg <- list(c(2,3,5), c(2,3), c(3,5), 5, 2, 3, c(2,5))
+
+
+mod <- c()
+ll <- c()
+sig <- c()
+regg <- c()
+
+
+for (pi in p){
+  for (qi in q){
+    for (Pi in P){
+      for (Di in D){
+        for (Qi in Q){
+          for (si in s){
+            for (i in 1:length(reg)){
+              
+          selmod <- arima(train2.tr$Bankruptcy_Rate, order = c(pi,d,qi), 
+                          seasonal = list(order = c(Pi,Di,Qi), period = si), xreg=train2.tr[,reg[[i]]],
+                          method = "CSS", optim.control = list(maxit = 1000))
+          
+          mod <- c(mod,paste(c(pi,d,qi,Pi,Di,Qi,si), collapse = ","))
+          ll <- c(ll,selmod$loglik)
+          sig <- c(sig,selmod$sigma2)
+          regg <- c(regg,paste(c(reg[[i]]), collapse = ","))
+            }          
+          }
+        }
+      }
+    }
+  }
+}
+
+
+tab <- data.frame(mod,ll,sig, regg)
+tab <- tab[order(tab$ll, decreasing = T),]
+write.csv(tab, file = "models.csv")
+
+
+# 4,1,1,2,0,3,12
+
+selmod <- arima(train2.tr$Bankruptcy_Rate, order = c(4,1,1), 
+                seasonal = list(order = c(2,0,3), period = 12), 
+                method = "ML",optim.control = list(maxit = 1000))
+
+
+m1 <- arima(y, order = c(1,1,1), 
+                seasonal = list(order = c(0,2,Q), period = s), 
+                method = "CSS",optim.control = list(maxit = 1000))
+
+m2 <- arima(y, order = c(1,1,1), 
+                seasonal = list(order = c(0,2,Q), period = s), 
+                method = "CSS",optim.control = list(maxit = 1000))
+
+m3
+
+qqPlot(m1$residuals)
+acf(m1$residuals)
+pacf(m1$residuals)
+tsdiag(m1)
+
+
+
+# Let's choose the model, pdq PDQ s , xregs
+# Run diagnostics
+# Decide if we need ARCH/GARCH
+# If we need it, we again iterate through different k and l to find best ARCH/GARCH model
+# Do the prediction with some models and choose the best model.
+
+
+
+```
+
+
+
+
+
+
+
+We are using `r nrow(train)` monthes data from "train" to forecast monthly bankruptcy rate in 2011.
+
+```{r echo=FALSE, warning=FALSE}
+head(train)
+pairs(train[-1], lower.panel = panel.smooth, upper.panel = panel.cor, diag.panel = panel.hist)
+summary(lm(Bankruptcy_Rate~., data=train))
+
+
+y <- train[,"Bankruptcy_Rate"]
+ly <- log(y)
+par(mfrow=c(2,1))
+plot(y, pch=n, )
+```
+
+
+
+```{r}
+x.pop <- scale(train[,"Population"])
+m.ar1 <- arima(y, order=c(1,1,0), xreg = x.pop, method="CSS") #AR(1)
+m.sar1 <- arima(y, order=c(1,1,0), xreg = x.pop, method="CSS") #AR(1)
+m.sar1 <- arima(log(train$Bankruptcy_Rate), xreg = train[,c(2,3,5)],
+              order = c(1,0,0), seasonal = list(order = c(2,1,1), period = 12))
+
+summary(m.ar1)
+
+
+p = 1; d = 1; q = 0
+P = 10; D = 1; Q = 10
+s = 10
+
+selmod <- arima(y, order = c(p,d,q), 
+                seasonal = list(order = c(P,D,Q), period = s), 
+                method = "CSS",optim.control = list(maxit = 1000))
+
+selmod <- auto.arima(y, xreg = scale(x.pop), max.p = 10, max.q = 10, max.P = 10, max.Q = 10)
+summary(selmod)
+ndiffs(y)
+acf(selmod$residuals)
+pacf(selmod$residuals)
+
+
+auto.arima(train["Bankruptcy_Rate"], xreg = train["Population"], d = 1)
+#str(train)
+#summary(train)
+
+#head(test)
+#str(test)
+```
+
+
+Scale the variables for comparisions only.
+```{r, warning=FALSE, eval=FALSE}
+for (i in 2:5) {
+    train[,i] <- scale(train[,i])
+}
+
+p1 <- ggplot(aes(x=Month), data = train) + geom_line(aes(y=Bankruptcy_Rate), color="red") + geom_line(aes(y=Unemployment_Rate), color="blue") +
+    geom_line(aes(y=Population), color="green")  +
+    geom_line(aes(y=House_Price_Index), color="white")
+p1
+```
+
+
+**Bankruptcy Rate**
+```{r echo=TRUE, warning=FALSE}
+train <- read.csv("train.csv")
+
+br.train <- train$Bankruptcy_Rate
+br.train <- ts(br.train)
+
+
+par(mfrow=c(2,1))
+plot(br.train, main="1987 ~ 2010 Monthly Bankruptcy Rate")
+acf(br.train, main="", lag.max = 288)
+
+```
+
+
+**Unemployment Rate**
+```{r echo=TRUE, warning=FALSE}
+ur.train <- train$Unemployment_Rate
+ur.train <- ts(ur.train)
+
+par(mfrow=c(2,1))
+plot(ur.train, main="1987 ~ 2010 Monthly Unemployment Rate")
+acf(ur.train, main="", lag.max = 288)
+```
+NOT time series?
+
+
+**Population**
+```{r echo=TRUE, warning=FALSE}
+pp.train <- train$Population
+pp.train <- ts(pp.train)
+
+par(mfrow=c(2,1))
+plot(pp.train, main="1987 ~ 2010 Monthly Population")
+acf(pp.train, main="", lag.max = 288)
+```
+NOT time series?
+
+
+**House Price Index**
+```{r echo=TRUE, warning=FALSE}
+hp.train <- train$House_Price_Index
+hp.train <- ts(hp.train)
+
+par(mfrow=c(2,1))
+plot(hp.train, main="1987 ~ 2010 Monthly House Price Index")
+acf(hp.train, main="", lag.max = 288)
+```
+NOT time series?
+
+
+Description of the method
+===========================
+i.e., different modeling approaches
+
+```{r}
+#   Month Unemployment_Rate Population Bankruptcy_Rate House_Price_Index
+# 1 11987               9.5   26232423       0.0077004              52.2
+# 2 21987               9.5   26254410       0.0082196              53.1
+# 3 31987               9.4   26281420       0.0084851              54.7
+# 4 41987               9.2   26313260       0.0078326              55.4
+# 5 51987               8.9   26346526       0.0070901              55.9
+# 6 61987               8.9   26379319       0.0083285              56.1
+
+attach(train)
+arima(Bankruptcy_Rate, )
+
+```
+
+
+
+
+
+Justification of the method
+===========================
+A textual and visual justification of the method you chose to solve the problem (i.e.,what type of model did you choose, how did you choose it, and why did you choose it?), and an acknowledgement of any limitations associated with your method.
+
+
+
+A graphical and tabular depiction of your forecasting results
+=============================================================
+

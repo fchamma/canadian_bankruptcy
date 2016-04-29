@@ -1,0 +1,112 @@
+---
+title: "Time Series Final Project"
+author: "Felipe Chamma, Eric Lee, Miao Lu"
+date: "November 24, 2015"
+output: html_document
+---
+
+Description of the problem
+===========================
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library(ggplot2)
+```
+
+```{r echo=FALSE, warning=FALSE}
+# setwd("~/Documents/604_time_series/data")
+train <- read.csv("train.csv")
+test <- read.csv("test.csv")
+```
+
+We are using `r nrow(train)` monthes data from "train" to forecast monthly bankruptcy rate in 2011.
+
+```{r echo=FALSE, warning=FALSE}
+head(train)
+#str(train)
+#summary(train)
+
+#head(test)
+#str(test)
+```
+
+
+Scale the variables for comparisions only.
+```{r echo=TRUE, warning=FALSE}
+for (i in 2:5) {
+    train[,i] <- scale(train[,i])
+}
+
+p1 <- ggplot(aes(x=Month), data = train) + geom_line(aes(y=Bankruptcy_Rate), color="red") + geom_line(aes(y=Unemployment_Rate), color="blue") +
+    geom_line(aes(y=Population), color="green")  +
+    geom_line(aes(y=House_Price_Index), color="white")
+p1
+```
+
+
+**Bankruptcy Rate**
+```{r echo=TRUE, warning=FALSE}
+train <- read.csv("train.csv")
+
+br.train <- train$Bankruptcy_Rate
+br.train <- ts(br.train)
+
+par(mfrow=c(2,1))
+plot(br.train, main="1987 ~ 2010 Monthly Bankruptcy Rate")
+acf(br.train, main="", lag.max = 288)
+```
+
+
+**Unemployment Rate**
+```{r echo=TRUE, warning=FALSE}
+ur.train <- train$Unemployment_Rate
+ur.train <- ts(ur.train)
+
+par(mfrow=c(2,1))
+plot(ur.train, main="1987 ~ 2010 Monthly Unemployment Rate")
+acf(ur.train, main="", lag.max = 288)
+```
+NOT time series?
+
+
+**Population**
+```{r echo=TRUE, warning=FALSE}
+pp.train <- train$Population
+pp.train <- ts(pp.train)
+
+par(mfrow=c(2,1))
+plot(pp.train, main="1987 ~ 2010 Monthly Population")
+acf(pp.train, main="", lag.max = 288)
+```
+NOT time series?
+
+
+**House Price Index**
+```{r echo=TRUE, warning=FALSE}
+hp.train <- train$House_Price_Index
+hp.train <- ts(hp.train)
+
+par(mfrow=c(2,1))
+plot(hp.train, main="1987 ~ 2010 Monthly House Price Index")
+acf(hp.train, main="", lag.max = 288)
+```
+NOT time series?
+
+
+Description of the method
+===========================
+i.e., different modeling approaches
+
+
+
+
+
+
+Justification of the method
+===========================
+A textual and visual justification of the method you chose to solve the problem (i.e.,what type of model did you choose, how did you choose it, and why did you choose it?), and an acknowledgement of any limitations associated with your method.
+
+
+
+A graphical and tabular depiction of your forecasting results
+=============================================================
+

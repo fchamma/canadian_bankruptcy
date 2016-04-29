@@ -1,0 +1,220 @@
+---
+title: "Time Series Final Project"
+author: "Felipe Chamma, Eric Lee, Miao Lu"
+date: "November 24, 2015"
+output: html_document
+---
+
+Description of the problem
+===========================
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(forecast)  #ndiffs
+library(astsa)  #sarima
+```
+
+```{r echo=FALSE, warning=FALSE}
+# setwd("~/Documents/604_time_series/data")
+train <- read.csv("train.csv")
+test <- read.csv("test.csv")
+```
+We are using `r nrow(train)` monthes data from "train" to forecast monthly bankruptcy rate in 2011.
+
+```{r echo=FALSE, warning=FALSE}
+head(train)  # time + 4 variables
+head(test)  # time + 3 variables
+```
+Because our train.csv file has `r length(head(train))` variables, including time, and test.csv file has only `r length(head(test))` variables (including time), we consider deviding data in train.csv file into training set and test set.
+
+
+**Scale the variables for comparisions only**
+```{r echo=TRUE, warning=FALSE}
+for (i in 2:5) {
+    train[,i] <- scale(train[,i])
+}
+
+p1 <- ggplot(aes(x=Month), data = train) + geom_line(aes(y=Bankruptcy_Rate), color="red") + geom_line(aes(y=Unemployment_Rate), color="blue") +
+    geom_line(aes(y=Population), color="green")  +
+    geom_line(aes(y=House_Price_Index), color="white")
+p1
+```
+
+**Unemployment Rate**
+```{r echo=TRUE, warning=FALSE}
+ur.train <- train$Unemployment_Rate
+ur.train <- ts(ur.train)
+
+par(mfrow=c(2,1))
+plot(ur.train, main="1987 ~ 2010 Monthly Unemployment Rate")
+acf(ur.train, main="", lag.max = 288)
+```
+NOT time series?
+
+
+**Population**
+```{r echo=TRUE, warning=FALSE}
+pp.train <- train$Population
+pp.train <- ts(pp.train)
+
+par(mfrow=c(2,1))
+plot(pp.train, main="1987 ~ 2010 Monthly Population")
+acf(pp.train, main="", lag.max = 288)
+```
+NOT time series?
+
+
+**House Price Index**
+```{r echo=TRUE, warning=FALSE}
+hp.train <- train$House_Price_Index
+hp.train <- ts(hp.train)
+
+par(mfrow=c(2,1))
+plot(hp.train, main="1987 ~ 2010 Monthly House Price Index")
+acf(hp.train, main="", lag.max = 288)
+```
+NOT time series?
+
+
+
+**Bankruptcy Rate**
+```{r echo=TRUE, warning=FALSE}
+train <- read.csv("train.csv")
+
+br.train <- train$Bankruptcy_Rate
+br.train <- ts(br.train)
+par(mfrow=c(2,1))
+plot(br.train, main="1987 ~ 2010 Monthly Bankruptcy Rate")
+acf(br.train, main="", lag.max = 288)
+adf.test(br.train)  # not stationary
+
+lbr.train <- log(br.train)
+par(mfrow=c(2,1))
+plot(lbr.train, main="1987 ~ 2010 LOG Monthly Bankruptcy Rate")
+acf(lbr.train, main="", lag.max = 288)
+adf.test(lbr.train)  # not stationary
+
+ndiffs(lbr.train)
+nsdiffs(lbr.train)
+```
+ordinary differencing: `r ndiffs(lbr.train)`
+seasonal differencing: `r nsdiffs(lbr.train)`
+we do not need to take seasonal difference ! = no seasonality
+
+Description of the method
+===========================
+i.e., different modeling approaches
+
+arima + covariate
+arma + garch
+
+***we start with ARIMA***
+```{r echo=TRUE, warning=FALSE}
+lbr.train.1 <- diff(lbr.train, differences = 1)
+plot(lbr.train.1, main = "lbr.train.1 Time Series")  
+adf.test(lbr.train.1)  # it is stationary
+```
+
+```{r echo=TRUE, warning=FALSE}
+par(mfrow=c(2,1))
+acf(lbr.train.1, main = "ACF for lbr.train.1", lag.max = 72)
+pacf(lbr.train.1, main = "PACF for lbr.train.1", lag.max = 120)
+# p = 1, 2; q = 2
+
+acf(abs(lbr.train.1), main = "ACF for |lbr.train.1|", lag.max = 120)
+pacf(abs(lbr.train.1), main = "PACF for |lbr.train.1|", lag.max = 120)
+# k
+acf(lbr.train.1^2, main = "ACF for squared lbr.train.1", lag.max = 120)
+pacf(lbr.train.1^2, main = "PACF for squared lbr.train.1", lag.max = 120)
+# k 
+```
+
+```{r echo=TRUE, warning=FALSE}
+m1 <- arima(lbr.train, order=c(1, 1, 2), method="ML")
+m1
+```
+The estimates for parameters are all significant.
+
+```{r echo=TRUE, warning=FALSE}
+m2 <- arima(lbr.train, order=c(1, 1, 1), method="ML")
+m2
+```
+The estimates for parameters are both significant.
+
+
+```{r echo=TRUE, warning=FALSE}
+m1.measures <- c(m1$sigma2, m1$loglik, m1$aic)
+m2.measures <- c(m2$sigma2, m2$loglik, m2$aic)
+m1m2 <- data.frame("m1" = m1.measures, "m2" = m2.measures, "cp" = m2.measures-m1.measures)
+rownames(m1m2) <- c("sigma2", "loglik", "aic")
+m1m2
+```
+m1 (1,1,2) is better than m2. q needs to stay at 2.
+
+```{r echo=TRUE, warning=FALSE}
+m3 <- arima(lbr.train, order=c(2, 1, 2), method="ML")
+m3
+```
+The estimate for ar2 is not significant.
+We stay with m1 ~ arima(1, 1, 2)
+
+```{r echo=TRUE, warning=FALSE}
+tsdiag(m1)
+```
+we see seasonality in ACF.
+
+
+***we try SARIMA without seasonal differencing beforehand***
+```{r echo=TRUE, warning=FALSE}
+par(mfrow=c(2,1))
+acf(lbr.train.1, main = "ACF for lbr.train.1", lag.max = 72)
+pacf(lbr.train.1, main = "PACF for lbr.train.1", lag.max = 72)
+# p = 1, 2; q = 2; P = 1, Q = 1, 2, 3, 4, ...
+
+m4 <- arima(lbr.train, order=c(1, 1, 2), seasonal = list(order = c(1, 0, 1), period = 12), method = "ML")
+m4
+```
+
+```{r echo=TRUE, warning=FALSE}
+m5 <- arima(lbr.train, order=c(1, 1, 2), seasonal = list(order = c(1, 0, 2), period = 12), method = "ML")
+m5
+```
+m5 better
+
+```{r echo=TRUE, warning=FALSE}
+m6 <- arima(lbr.train, order=c(1, 1, 2), seasonal = list(order = c(1, 0, 3), period = 12), method = "ML")
+m6
+```
+m6 better
+
+```{r echo=TRUE, warning=FALSE}
+m7 <- arima(lbr.train, order=c(1, 1, 2), seasonal = list(order = c(1, 0, 4), period = 12), method = "ML")
+m7
+```
+m6 better
+
+
+
+
+```{r echo=TRUE, warning=FALSE}
+m1.measures <- c(m1$sigma2, m1$loglik, m1$aic)
+m6.measures <- c(m6$sigma2, m6$loglik, m6$aic)
+
+m1m6 <- data.frame("m1" = m1.measures, "m6" = m6.measures, "cp" = m6.measures-m1.measures)
+rownames(m1m6) <- c("sigma2", "loglik", "aic")
+m1m6
+```
+m6 (1,1,2, 1,0,4, 12) is better than m1.
+
+
+
+
+Justification of the method
+===========================
+A textual and visual justification of the method you chose to solve the problem (i.e.,what type of model did you choose, how did you choose it, and why did you choose it?), and an acknowledgement of any limitations associated with your method.
+
+
+
+A graphical and tabular depiction of your forecasting results
+=============================================================
+
